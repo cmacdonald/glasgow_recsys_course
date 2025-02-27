@@ -38,3 +38,35 @@ def evaluate_model(model, df, k=10):
         hr_list.append(hr)
         ndcg_list.append(ndcg)
     return np.mean(hr_list), np.mean(ndcg_list)
+
+
+def evaluate_model_gnn(model, node_features, adj, val_pairs, k=10):
+    model.eval()
+    hr_list = []
+    ndcg_list = []
+    for user, true_item in val_pairs.items():
+        # Sample 99 negative items (ensuring they are different from the true item)
+        negatives = []
+        while len(negatives) < 99:
+            candidate = np.random.randint(0, num_items)
+            if candidate != true_item:
+                negatives.append(candidate)
+        candidate_items = [true_item] + negatives
+        candidate_items_tensor = torch.tensor(candidate_items, dtype=torch.long)
+        user_tensor = torch.tensor([user], dtype=torch.long).repeat(len(candidate_items))
+        with torch.no_grad():
+            scores = model.predict(user_tensor, candidate_items_tensor, node_features, adj)
+        scores = scores.detach().cpu().numpy().tolist()
+        # Rank candidate items in descending order by score
+        ranked_items = [x for _, x in sorted(zip(scores, candidate_items), key=lambda pair: pair[0], reverse=True)]
+        # HR@10: check if true_item is in the top 10
+        hr = 1 if true_item in ranked_items[:k] else 0
+        # NDCG@10: discounted gain if true_item is in top 10
+        if true_item in ranked_items[:k]:
+            index = ranked_items.index(true_item)
+            ndcg = 1 / np.log2(index + 2)
+        else:
+            ndcg = 0
+        hr_list.append(hr)
+        ndcg_list.append(ndcg)
+    return np.mean(hr_list), np.mean(ndcg_list)
